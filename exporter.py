@@ -127,11 +127,12 @@ def paginated_get(url, params, combine_key=None, response_url=None):
 # GET requests
 
 
-def channel_list(team_id=None, response_url=None):
+def channel_list(team_id=None, response_url=None, types="public_channel,private_channel,mpim,im"):
+    print("Getting channel list")
     params = {
         # "token": os.environ["SLACK_USER_TOKEN"],
         "team_id": team_id,
-        "types": "public_channel,private_channel,mpim,im",
+        "types": types,
         "limit": 200,
     }
 
@@ -143,11 +144,15 @@ def channel_list(team_id=None, response_url=None):
     )
 
 
-def get_file_list():
+def get_file_list(channel_id=None):
     current_page = 1
     total_pages = 1
     while current_page <= total_pages:
-        response = get_data("https://slack.com/api/files.list", params={"page": current_page})
+        params = {"page": current_page }
+        if channel_id is not None:
+            params["channel"] = channel_id
+
+        response = get_data("https://slack.com/api/files.list", params=params)
         json_data = response.json()
         total_pages = json_data["paging"]["pages"]
         for file in json_data["files"]:
@@ -176,6 +181,7 @@ def channel_history(channel_id, response_url=None, oldest=None, latest=None):
 
 
 def user_list(team_id=None, response_url=None):
+    print("Getting user list")
     params = {
         # "token": os.environ["SLACK_USER_TOKEN"],
         "limit": 200,
@@ -340,7 +346,7 @@ def parse_channel_history(msgs, users, check_thread=False):
             usr = {"name": "", "real_name": "none"}
 
         timestamp = datetime.fromtimestamp(round(float(msg["ts"]))).strftime(
-            "%m-%d-%y %H:%M:%S"
+            "%Y-%m-%d %H:%M:%S"
         )
         text = msg["text"] if msg["text"].strip() != "" else "[no message content]"
         for u in [x["id"] for x in users]:
@@ -415,10 +421,10 @@ def download_file(destination_path, url, attempt = 0):
     else:
         return True
 
-def save_files(file_dir):
+def save_files(file_dir, channel_id=None):
     total = 0
     start = default_timer()
-    for file_info in get_file_list():
+    for file_info in get_file_list(channel_id):
         url = file_info["url_private"]
         file_info["name"] = sanitize_filename(file_info["name"])
         destination_filename = "{id}-{name}".format(**file_info)
@@ -482,9 +488,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Download all files",
     )
+    parser.add_argument(
+        "--types",
+        type=str,
+        default="public_channel,private_channel,mpim,im",
+        help="Channel types to export. Defaults to public_channel,private_channel,mpim,im",
+    )
 
     a = parser.parse_args()
-    ts = str(datetime.strftime(datetime.now(), "%m-%d-%Y_%H%M%S"))
+    ts = str(datetime.strftime(datetime.now(), "%Y-%m-%d_%H%M%S"))
     sep_str = "*" * 24
 
     if a.o is None and a.files:
@@ -543,8 +555,11 @@ if __name__ == "__main__":
         if a.r:
             save_replies(channel_hist, channel_id, channel_list, users)
 
-    ch_list = channel_list()
-    user_list = user_list()
+
+    ch_list = []
+    if not a.files:
+        ch_list = channel_list(types=a.types)
+        user_list = user_list()
 
     if a.lc:
         data = ch_list if a.json else parse_channel_list(ch_list, user_list)
@@ -563,9 +578,9 @@ if __name__ == "__main__":
                 save_channel(ch_hist, ch_id, ch_list, user_list)
     # elif, since we want to avoid asking for channel_history twice
     elif a.r:
-        for ch_id in [x["id"] for x in channel_list()]:
+        for ch_id in [x["id"] for x in channel_list(types=a.types)]:
             ch_hist = channel_history(ch_id, oldest=a.fr, latest=a.to)
             save_replies(ch_hist, ch_id, ch_list, user_list)
 
     if a.files and a.o is not None:
-        save_files(out_dir)
+        save_files(out_dir, a.ch)
